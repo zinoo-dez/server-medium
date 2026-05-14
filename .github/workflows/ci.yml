@@ -1,0 +1,61 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: medium_user
+          POSTGRES_PASSWORD: medium_pass_2024
+          POSTGRES_DB: medium_clone
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://medium_user:medium_pass_2024@localhost:5434/medium_clone?schema=public
+
+      - name: Run build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+        env:
+          DATABASE_URL: postgresql://medium_user:medium_pass_2024@localhost:5434/medium_clone?schema=public
+          JWT_ACCESS_SECRET: test_secret
+          JWT_REFRESH_SECRET: test_refresh_secret
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker Image
+        run: docker build -t medium-server .

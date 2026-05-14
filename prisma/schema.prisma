@@ -1,0 +1,269 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-arm64-openssl-3.0.x", "debian-openssl-3.0.x", "linux-arm64-openssl-1.1.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  username      String    @unique @db.VarChar(30)
+  email         String    @unique @db.VarChar(255)
+  passwordHash  String    @map("password_hash") @db.VarChar(255)
+  displayName   String    @map("display_name") @db.VarChar(100)
+  bio           String?   @db.Text
+  avatarUrl     String?   @map("avatar_url") @db.VarChar(500)
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  articles      Article[]
+  comments      Comment[]
+  claps         Clap[]
+  followers     Follow[]  @relation("Following")
+  following     Follow[]  @relation("Follower")
+  bookmarks     Bookmark[]
+  notificationsReceived Notification[] @relation("Recipient")
+  notificationsTriggered Notification[] @relation("Actor")
+  auditLogs     AdminAuditLog[]
+  reportsFiled  Report[] @relation("Reporter")
+  reportsResolved Report[] @relation("Resolver")
+
+  @@map("users")
+}
+
+enum Role {
+  USER
+  ADMIN
+
+  @@map("role")
+}
+
+model Article {
+  id            String    @id @default(uuid()) @db.Uuid
+  authorId      String    @map("author_id") @db.Uuid
+  title         String    @db.VarChar(255)
+  slug          String    @unique @db.VarChar(300)
+  content       Json
+  excerpt       String?   @db.VarChar(300)
+  coverImageUrl String?   @map("cover_image_url") @db.VarChar(500)
+  status        ArticleStatus @default(DRAFT)
+  readingTime   Int       @default(0) @map("reading_time")
+  clapCount     Int       @default(0) @map("clap_count")
+  commentCount  Int       @default(0) @map("comment_count")
+  publishedAt   DateTime? @map("published_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  author        User      @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  comments      Comment[]
+  claps         Clap[]
+  tags          ArticleTag[]
+  bookmarks     Bookmark[]
+  notifications Notification[]
+
+  @@map("articles")
+  @@index([authorId])
+  @@index([status, publishedAt(sort: Desc)])
+  @@index([clapCount(sort: Desc)])
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+  UNLISTED
+  REMOVED
+
+  @@map("article_status")
+}
+
+model Comment {
+  id            String    @id @default(uuid()) @db.Uuid
+  articleId     String    @map("article_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  parentId      String?   @map("parent_id") @db.Uuid
+  content       String    @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  article       Article   @relation(fields: [articleId], references: [id], onDelete: Restrict)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  parent        Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Restrict)
+  replies       Comment[] @relation("CommentReplies")
+  notifications Notification[]
+
+  @@map("comments")
+  @@index([articleId, createdAt(sort: Desc)])
+  @@index([parentId])
+}
+
+model Clap {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  articleId     String    @map("article_id") @db.Uuid
+  count         Int       @default(1)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  article       Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@map("claps")
+  @@unique([userId, articleId])
+  @@index([articleId])
+  @@index([userId, articleId])
+}
+
+model Follow {
+  id            String    @id @default(uuid()) @db.Uuid
+  followerId    String    @map("follower_id") @db.Uuid
+  followingId   String    @map("following_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  follower      User      @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following     User      @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@map("follows")
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+model Tag {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String    @unique @db.VarChar(50)
+  slug          String    @unique @db.VarChar(60)
+  description   String?   @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  articles      ArticleTag[]
+
+  @@map("tags")
+}
+
+model ArticleTag {
+  articleId     String    @map("article_id") @db.Uuid
+  tagId         String    @map("tag_id") @db.Uuid
+
+  article       Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tag           Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, tagId])
+  @@map("article_tags")
+}
+
+model Bookmark {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  articleId     String    @map("article_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  article       Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@map("bookmarks")
+  @@unique([userId, articleId])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model Notification {
+  id            String    @id @default(uuid()) @db.Uuid
+  recipientId   String    @map("recipient_id") @db.Uuid
+  actorId       String    @map("actor_id") @db.Uuid
+  type          NotificationType
+  articleId     String?   @map("article_id") @db.Uuid
+  commentId     String?   @map("comment_id") @db.Uuid
+  isRead        Boolean   @default(false) @map("is_read")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  recipient     User      @relation("Recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor         User      @relation("Actor", fields: [actorId], references: [id], onDelete: Cascade)
+  article       Article?  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  comment       Comment?  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+  @@index([recipientId, isRead, createdAt(sort: Desc)])
+}
+
+enum NotificationType {
+  CLAP
+  COMMENT
+  FOLLOW
+  REPLY
+
+  @@map("notification_type")
+}
+
+model Report {
+  id            String    @id @default(uuid()) @db.Uuid
+  reporterId    String    @map("reporter_id") @db.Uuid
+  targetType    ReportTargetType @map("target_type")
+  targetId      String    @map("target_id") @db.Uuid
+  reason        ReportReason
+  description   String?   @db.Text
+  status        ReportStatus @default(PENDING)
+  resolvedById  String?   @map("resolved_by") @db.Uuid
+  resolvedAt    DateTime? @map("resolved_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  reporter      User      @relation("Reporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  resolver      User?     @relation("Resolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@map("reports")
+}
+
+enum ReportTargetType {
+  ARTICLE
+  COMMENT
+  USER
+  
+  @@map("report_target_type")
+}
+
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  MISINFORMATION
+  COPYRIGHT
+  OTHER
+  
+  @@map("report_reason")
+}
+
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+
+  @@map("report_status")
+}
+
+model PlatformSetting {
+  key           String    @id @db.VarChar(100)
+  value         Json
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  updatedBy     String    @map("updated_by") @db.Uuid
+
+  @@map("platform_settings")
+}
+
+model AdminAuditLog {
+  id            String    @id @default(uuid()) @db.Uuid
+  adminId       String    @map("admin_id") @db.Uuid
+  action        String    @db.VarChar(100)
+  targetType    String    @map("target_type") @db.VarChar(50)
+  targetId      String    @map("target_id") @db.Uuid
+  details       Json?
+  ipAddress     String?   @map("ip_address") @db.VarChar(45)
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  admin         User      @relation(fields: [adminId], references: [id], onDelete: Restrict)
+
+  @@map("admin_audit_logs")
+}
